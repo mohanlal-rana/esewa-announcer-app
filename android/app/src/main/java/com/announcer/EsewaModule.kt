@@ -1,4 +1,4 @@
-package com.client
+package com.announcer
 
 import android.content.ComponentName
 import android.content.Context
@@ -40,7 +40,7 @@ class EsewaModule(reactContext: ReactApplicationContext) :
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.ENGLISH
-            tts?.setSpeechRate(1.0f)
+            tts?.setSpeechRate(0.9f)
             tts?.setPitch(1.1f)
             isTtsInitialized = true
         } else {
@@ -103,7 +103,7 @@ class EsewaModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun testVoice() {
-        speak("eSewa announcement enabled", 1.0f) // max volume
+        speak("20  rupees  received", 1.0f) // max volume
     }
 
     @ReactMethod

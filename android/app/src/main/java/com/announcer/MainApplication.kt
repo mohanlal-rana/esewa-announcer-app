@@ -7,7 +7,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.ReactPackage  // <-- Add this
-import com.client.EsewaPackage          // <-- Add this
+import com.announcer.EsewaPackage          // <-- Add this
 class MainApplication : Application(), ReactApplication {
 
   override val reactHost: ReactHost by lazy {

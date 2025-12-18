@@ -1,4 +1,4 @@
-package com.client
+package com.announcer
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -19,6 +19,7 @@ override fun onCreate() {
     tts = TextToSpeech(applicationContext) { status ->
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
+            tts?.setSpeechRate(0.9f)
             isTtsReady = true
         }
     }
@@ -51,7 +52,8 @@ override fun onCreate() {
             }
         } else 0L
 
-        val speakText = if (amount > 0) "You received $amount rupees" else "You received zero money in eSewa"
+        val speakText = if (amount > 0) "  $amount   rupees    received" 
+        else "You received zero money in eSewa"
 
         try {
             val params = Bundle().apply {
