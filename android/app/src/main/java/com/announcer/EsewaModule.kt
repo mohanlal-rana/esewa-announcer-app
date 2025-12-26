@@ -1,13 +1,12 @@
 package com.announcer
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
+import android.media.*
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -16,7 +15,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import java.util.Locale
+import java.util.*
 
 class EsewaModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext), TextToSpeech.OnInitListener {
@@ -24,120 +23,157 @@ class EsewaModule(reactContext: ReactApplicationContext) :
     private var tts: TextToSpeech? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
+    private var bellPlayer: MediaPlayer? = null
     private var isTtsInitialized = false
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var words: List<String> = emptyList()
+    private var currentIndex = 0
+    private var gapMs: Long = 300
+    private var volume: Float = 1.0f
 
     override fun getName(): String = "EsewaModule"
 
     init {
-        try {
-            tts = TextToSpeech(reactContext, this)
-            audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        } catch (e: Exception) {
-            Log.e("EsewaModule", "TTS init failed: ${e.message}")
-        }
+        tts = TextToSpeech(reactContext, this)
+        audioManager =
+            reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.ENGLISH
             tts?.setSpeechRate(0.9f)
-            tts?.setPitch(1.1f)
+            tts?.setPitch(1f)
             isTtsInitialized = true
-        } else {
-            Log.e("EsewaModule", "TTS Initialization Failed!")
         }
     }
 
-    // Audio Focus
+    // ---------- AUDIO FOCUS ----------
     private fun requestAudioFocus() {
-        audioManager ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val attributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
-            focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                .setAudioAttributes(attributes)
-                .build()
-            audioManager!!.requestAudioFocus(focusRequest!!)
+
+            focusRequest = AudioFocusRequest.Builder(
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            ).setAudioAttributes(attributes).build()
+
+            audioManager?.requestAudioFocus(focusRequest!!)
         } else {
-            audioManager!!.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            audioManager?.requestAudioFocus(
+                null,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            )
         }
     }
 
     private fun abandonAudioFocus() {
-        audioManager ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusRequest != null) {
-            audioManager!!.abandonAudioFocusRequest(focusRequest!!)
+            audioManager?.abandonAudioFocusRequest(focusRequest!!)
         } else {
-            audioManager!!.abandonAudioFocus(null)
+            audioManager?.abandonAudioFocus(null)
         }
     }
 
-    // Speak with volume control
-    private fun speak(message: String, volume: Float = 1.0f) {
-        val engine = tts ?: return
-        if (!isTtsInitialized) return
+    // ---------- WORD-BY-WORD SPEECH ----------
+    private fun speakNextWord() {
+        if (currentIndex >= words.size) {
+            abandonAudioFocus()
+            return
+        }
 
-        requestAudioFocus()
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) { abandonAudioFocus() }
-            override fun onError(utteranceId: String?) { abandonAudioFocus() }
+        val word = words[currentIndex]
+        val utteranceId = UUID.randomUUID().toString()
+
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(id: String?) {}
+
+            override fun onDone(id: String?) {
+                handler.postDelayed({
+                    currentIndex++
+                    speakNextWord()
+                }, gapMs)
+            }
+
+            override fun onError(id: String?) {
+                abandonAudioFocus()
+            }
         })
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val params = Bundle().apply {
-                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
-                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "ESEWA_TTS")
-            }
-            engine.speak(message, TextToSpeech.QUEUE_FLUSH, params, "ESEWA_TTS")
-        } else {
-            val params = HashMap<String, String>()
-            params[TextToSpeech.Engine.KEY_PARAM_VOLUME] = volume.toString()
-            params[TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID] = "ESEWA_TTS"
-            @Suppress("DEPRECATION")
-            engine.speak(message, TextToSpeech.QUEUE_FLUSH, params)
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
         }
+
+        tts?.speak(word, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    }
+
+    private fun speakWithGap(text: String, vol: Float, gap: Long) {
+        if (!isTtsInitialized || text.isBlank()) return
+
+        requestAudioFocus()
+
+        words = text.split("\\s+".toRegex())
+        currentIndex = 0
+        volume = vol
+        gapMs = gap
+
+        speakNextWord()
+    }
+
+    // ---------- 🔔 BELL + SPEAK ----------
+    private fun playBellThenSpeak(text: String, vol: Float, gap: Long) {
+        requestAudioFocus()
+
+        bellPlayer?.release()
+        bellPlayer = MediaPlayer.create(reactApplicationContext, R.raw.bell)
+
+        bellPlayer?.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        )
+
+        bellPlayer?.setOnCompletionListener {
+            it.release()
+            bellPlayer = null
+
+            handler.postDelayed({
+                speakWithGap(text, vol, gap)
+            }, 150)
+        }
+
+        bellPlayer?.start()
+    }
+
+    // ---------- REACT METHODS ----------
+    @ReactMethod
+    fun speakTextWithBell(message: String, volume: Double = 1.0, gapMs: Int = 300) {
+        playBellThenSpeak(message, volume.toFloat(), gapMs.toLong())
     }
 
     @ReactMethod
     fun testVoice() {
-        speak("20  rupees  received", 1.0f) // max volume
+        playBellThenSpeak("20 rupees received", 1.0f, 300)
     }
 
-    @ReactMethod
-    fun speakText(message: String, volume: Double = 1.0) {
-        speak(message, volume.toFloat())
-    }
-
-    // Open notification settings
     @ReactMethod
     fun openNotificationSettings() {
-        try {
-            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            reactApplicationContext.startActivity(intent)
-        } catch (e: Exception) {
-            val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-            fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            reactApplicationContext.startActivity(fallback)
-        }
+        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        reactApplicationContext.startActivity(intent)
     }
 
-    // Check notification access
-@ReactMethod
-fun isNotificationServiceEnabled(promise: Promise) {
-    try {
-        val contentResolver = reactApplicationContext.contentResolver
-        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        val packageName = reactApplicationContext.packageName
-        
-        // This check is safer and accounts for null strings
-        val enabled = enabledListeners?.contains(packageName) == true
-        promise.resolve(enabled)
-    } catch (e: Exception) {
-        promise.reject("ERROR", e.message)
+    @ReactMethod
+    fun isNotificationServiceEnabled(promise: Promise) {
+        val enabled = Settings.Secure.getString(
+            reactApplicationContext.contentResolver,
+            "enabled_notification_listeners"
+        )
+        promise.resolve(enabled?.contains(reactApplicationContext.packageName) == true)
     }
-}
 }

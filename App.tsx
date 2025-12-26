@@ -36,19 +36,24 @@ export default function App() {
   const handleTestVoice = () => {
     if (!isSpeechEnabled) {
       setStatus('🔇 Speech is disabled.');
-    } else if (isAccessGranted) {
-      EsewaModule.testVoice();
-      setStatus('🔊 Voice test triggered!');
-    } else {
+      return;
+    }
+
+    if (!isAccessGranted) {
       Alert.alert(
         'Permission Required',
-        "Please grant Notification Access to the 'eSewa Announcer App' to enable voice.",
-        [
-          { text: 'Later', style: 'cancel' },
-          { text: 'Grant Access', onPress: handleGrantAccess },
-        ],
+        'Please grant Notification Access to enable voice.',
       );
+      return;
     }
+
+    EsewaModule.speakTextWithBell(
+      '20 rupees received',
+      1.0, // volume
+      300, // word gap
+    );
+
+    setStatus('🔊 Voice test triggered!');
     setTimeout(() => setStatus(''), 2000);
   };
 
