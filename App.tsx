@@ -50,7 +50,7 @@ export default function App() {
     EsewaModule.speakTextWithBell(
       '20 rupees received',
       1.0, // volume
-      300, // word gap
+      200, // word gap
     );
 
     setStatus('🔊 Voice test triggered!');
